@@ -15,7 +15,7 @@ end
 local function resume(thread, ...)
 	local ok, err = coroutine.resume(thread, ...)
 	if not ok then
-		task.spawn(error, tostring(err) .. "\n" .. debug.traceback(thread))
+		error(tostring(err) .. "\n" .. debug.traceback(thread))
 	end
 end
 

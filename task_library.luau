@@ -1,110 +1,104 @@
-local DEBUG = false
-
 local RunService = game:GetService("RunService")
-local Heartbeat = RunService.Heartbeat
+local Heartbeat  = RunService.Heartbeat
 
-local _cancelled = {}
-local _parallel = {}
+local function wrap(functionOrThread, ...)
+	if type(functionOrThread) == "thread" then
+		return functionOrThread, ...
+	end
 
-local function _safeResume(thread, ...)
-	if _cancelled[thread] then
-		_cancelled[thread] = nil
-		return
-	end
-	local ok, err = coroutine.resume(thread, ...)
-	if not ok then
-		if DEBUG then
-			warn("[task] " .. tostring(err))
-		end
-	end
-end
-
-local function _toThread(f, ...)
-	if type(f) == "thread" then
-		return f, ...
-	end
 	local args = { ... }
 	return coroutine.create(function()
-		f(table.unpack(args))
+		functionOrThread(table.unpack(args))
 	end)
 end
 
-local function _yieldUntilNextHeartbeat()
-	local thread = coroutine.running()
-	local conn
-	conn = Heartbeat:Connect(function()
-		conn:Disconnect()
-		_safeResume(thread)
-	end)
-	coroutine.yield()
+local function resume(thread, ...)
+	local ok, err = coroutine.resume(thread, ...)
+	if not ok then
+		task.spawn(error, tostring(err) .. "\n" .. debug.traceback(thread))
+	end
 end
 
 local function spawn(functionOrThread, ...)
-	local thread, a, b, c, d, e = _toThread(functionOrThread, ...)
-	_safeResume(thread, a, b, c, d, e)
+	local thread = wrap(functionOrThread, ...)
+	resume(thread)
 	return thread
 end
 
 local function defer(functionOrThread, ...)
-	local thread, a, b, c, d, e = _toThread(functionOrThread, ...)
+	local thread = wrap(functionOrThread, ...)
 	local conn
 	conn = Heartbeat:Connect(function()
 		conn:Disconnect()
-		_safeResume(thread, a, b, c, d, e)
+		resume(thread)
 	end)
 	return thread
 end
 
 local function delay(duration, functionOrThread, ...)
-	duration = tonumber(duration) or 0
-	local thread, a, b, c, d, e = _toThread(functionOrThread, ...)
-	local elapsed = 0
+	duration = math.max(0, tonumber(duration) or 0)
+	local thread   = wrap(functionOrThread, ...)
+	local elapsed  = 0
 	local conn
 	conn = Heartbeat:Connect(function(dt)
-		elapsed = elapsed + dt
+		elapsed += dt
 		if elapsed >= duration then
 			conn:Disconnect()
-			_safeResume(thread, a, b, c, d, e)
+			resume(thread)
 		end
 	end)
 	return thread
 end
 
 local function wait(duration)
-	duration = tonumber(duration) or 0
-	local thread = coroutine.running()
+	duration = math.max(0, tonumber(duration) or 0)
+	local thread  = coroutine.running()
 	local elapsed = 0
 	local conn
 	conn = Heartbeat:Connect(function(dt)
-		elapsed = elapsed + dt
+		elapsed += dt
 		if elapsed >= duration then
 			conn:Disconnect()
-			_safeResume(thread, elapsed)
+			resume(thread, elapsed)
 		end
 	end)
 	return coroutine.yield()
 end
 
+
 local function cancel(thread)
-	if coroutine.close then
-		pcall(coroutine.close, thread)
-	else
-		_cancelled[thread] = true
+	local ok, err = coroutine.close(thread)
+	if not ok then
+		error(err, 2)
 	end
 end
 
 local function desynchronize()
+	local actor = script:FindFirstAncestorOfClass("Actor")
+	if not actor then
+		error("task.desynchronize: script is not a descendant of an Actor", 2)
+	end
 	local thread = coroutine.running()
-	if not thread or _parallel[thread] then return end
-	_parallel[thread] = true
-	_yieldUntilNextHeartbeat()
+	local conn
+	conn = Heartbeat:Connect(function()
+		conn:Disconnect()
+		resume(thread)
+	end)
+	coroutine.yield()
 end
 
 local function synchronize()
+	local actor = script:FindFirstAncestorOfClass("Actor")
+	if not actor then
+		error("task.synchronize: script is not a descendant of an Actor", 2)
+	end
 	local thread = coroutine.running()
-	if not thread or not _parallel[thread] then return end
-	_parallel[thread] = nil
-	_yieldUntilNextHeartbeat()
+	local conn
+	conn = Heartbeat:Connect(function()
+		conn:Disconnect()
+		resume(thread)
+	end)
+	coroutine.yield()
 end
 
 return {
